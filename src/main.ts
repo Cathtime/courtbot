@@ -6,8 +6,12 @@ import path from 'node:path';
 import { fileNavig } from './misc/fileNavig.ts';
 import type { IFolderContents } from './interfaces/IFolderContent.ts';
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
+export const client = new Client({
+    intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.MessageContent,
+		GatewayIntentBits.GuildMessages
+	]
 });
 
 client.once('clientReady', () => {
@@ -47,7 +51,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 	}
 
 	try {
-		await command.execute(interaction);
+		 command.execute(interaction);
 	} catch (error) {
 		console.error(error);
 		if (interaction.replied || interaction.deferred) {
