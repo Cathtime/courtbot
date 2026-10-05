@@ -1,28 +1,28 @@
-import {SlashCommandBuilder } from 'discord.js';
+import { SlashCommandBuilder } from 'discord.js';
 import { isMemberInServer } from '../../misc/verifyUserId.ts';
-import 'dotenv/config';
 import { createDiscordChannel, getRolesInfo } from '../../misc/courtLoop.ts';
 
 const Stage = {
     Pinging: 0,
-    Confirming: 1
+    Confirming: 1,
 } as const;
 
-type Stage = typeof Stage[keyof typeof Stage];
+type Stage = (typeof Stage)[keyof typeof Stage];
 
 export default {
     data: new SlashCommandBuilder()
         .setName('start')
         .setDescription('Starts a court round')
-        .addStringOption(option =>
-            option.setName('playercount')
+        .addStringOption((option) =>
+            option
+                .setName('playercount')
                 .setDescription('How many players will be in the round?')
-                .setRequired(false)
+                .setRequired(false),
         ),
     async execute(interaction: any) {
-        await interaction.reply(`Please ping everyone that will be included!`);
+        await interaction.reply('Please ping everyone that will be included!');
 
-        let allExtractedIds: string[] = [];
+        const allExtractedIds: string[] = [];
 
         const userResponse = await new Promise<string | null>((resolve) => {
             let currentStage: Stage = Stage.Pinging;
@@ -30,23 +30,29 @@ export default {
             const safetyTimer = setTimeout(() => {
                 cleanup();
                 resolve(null);
-            }, 60000); 
+            }, 60000);
 
             async function messageListener(message: any) {
-                if (message.author.bot || message.author.id !== interaction.user.id || message.channel.id !== interaction.channelId) return;
+                if (
+                    message.author.bot ||
+                    message.author.id !== interaction.user.id ||
+                    message.channel.id !== interaction.channelId
+                ) {
+                    return;
+                }
 
                 const contentLower = message.content.toLowerCase().trim();
 
                 if (currentStage === Stage.Pinging) {
                     const matches = [...message.content.matchAll(/<@!?(\d+)>/g)];
-                    
+
                     if (matches.length === 0) {
                         await interaction.followUp("That's not a ping. Please ping everyone that will be included!");
                         return;
                     }
 
-                    const ids = matches.map(match => match[1]);
-                    let turnIds: string[] = [];
+                    const ids = matches.map((match) => match[1]);
+                    const turnIds: string[] = [];
 
                     for (const id of ids) {
                         if (await isMemberInServer(interaction.guild, id)) {
@@ -56,10 +62,10 @@ export default {
 
                     if (turnIds.length > 0) {
                         allExtractedIds.push(...turnIds);
-                        currentStage = Stage.Confirming; 
-                        await interaction.followUp("Is that everyone entering? {yes/no}");
+                        currentStage = Stage.Confirming;
+                        await interaction.followUp('Is that everyone entering? {yes/no}');
                     } else {
-                        await interaction.followUp("None of those pings were valid server members. Please try again!");
+                        await interaction.followUp('None of those pings were valid server members. Please try again!');
                     }
                     return;
                 }
@@ -67,23 +73,22 @@ export default {
                 if (currentStage === Stage.Confirming) {
                     if (contentLower === 'yes') {
                         cleanup();
-                        resolve("yes");
-                        return;
-                    } 
-                    
-                    if (contentLower === 'no') {
-                        currentStage = Stage.Pinging; 
-                        await interaction.followUp("Please ping everyone that will be included!");
+                        resolve('yes');
                         return;
                     }
 
-                    await interaction.followUp("Is that everyone entering? {yes/no}");
-                    return;
+                    if (contentLower === 'no') {
+                        currentStage = Stage.Pinging;
+                        await interaction.followUp('Please ping everyone that will be included!');
+                        return;
+                    }
+
+                    await interaction.followUp('Is that everyone entering? {yes/no}');
                 }
             }
 
             function cleanup() {
-                clearTimeout(safetyTimer); 
+                clearTimeout(safetyTimer);
                 interaction.client.off('messageCreate', messageListener);
             }
 
@@ -91,22 +96,23 @@ export default {
         });
 
         if (userResponse === null) {
-            await interaction.followUp("User took too long to reply.");
+            await interaction.followUp('User took too long to reply.');
             return;
         }
 
-        console.log(`Continuing execution. Total IDs found:`, allExtractedIds);
+        const uniqueIds = [...new Set(allExtractedIds)];
+        console.log('Continuing execution. Total IDs found:', uniqueIds);
 
-        let channel;
+        const channel = await createDiscordChannel(interaction);
 
-        if (await createDiscordChannel(interaction) != null) {
-            channel = createDiscordChannel(interaction);
-        } else {
-            await interaction.followUp("channel creation failed");
+        if (channel == null) {
+            await interaction.followUp('channel creation failed');
+            return;
         }
 
+        await interaction.followUp(`Court channel created: <#${channel.id}>`);
+
         // get role info
-        getRolesInfo(interaction, allExtractedIds);
-        
-    }
-}
+        await getRolesInfo(interaction, uniqueIds, channel.id);
+    },
+};

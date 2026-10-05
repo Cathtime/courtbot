@@ -1,71 +1,103 @@
 import {
-     ChannelType,
-     Guild, 
-     ActionRowBuilder, 
-     StringSelectMenuBuilder, 
-     StringSelectMenuOptionBuilder,  
-    } from "discord.js";
-export async function createDiscordChannel(interaction: any) {
-    let channel;
+    ActionRowBuilder,
+    ChannelType,
+    ComponentType,
+    StringSelectMenuBuilder,
+    StringSelectMenuOptionBuilder,
+} from 'discord.js';
+import { assignRoleToCase, createCourtCase, type CourtRole } from './courtState.ts';
 
+const COURT_ROLES: CourtRole[] = ['witness', 'defendant', 'jury', 'attorney', 'plaintiff', 'judge'];
+
+export async function createDiscordChannel(interaction: any) {
     try {
-        await interaction.guild.channels.create({
+        return await interaction.guild.channels.create({
             name: `court-case-${interaction.user.id}`,
-            type: ChannelType.GuildText
-        })
-    } 
-    catch(error) {
-        console.error("there was an error" + error);
+            type: ChannelType.GuildText,
+        });
+    } catch (error) {
+        console.error('there was an error' + error);
         return null;
     }
-
-    return channel;
 }
 
 // ask the owner of the match who will be what based on the available players.
-export async function getRolesInfo(interaction: any, users: string[]) {
+export async function getRolesInfo(interaction: any, users: string[], channelId: string) {
+    const memberPromises = users.map((id) => interaction.guild.members.fetch(id).catch(() => null));
+    const members = (await Promise.all(memberPromises)).filter((member) => member !== null);
 
-    const memberPromises = users.map(id => interaction.guild.members.fetch(id).catch(() => null));
-    const members = (await Promise.all(memberPromises)).filter(m => m !== null);
-
-    const menuOptions = members.map(member => 
-        new StringSelectMenuOptionBuilder()
-            .setLabel(member.displayName)
-            .setValue(member.id)
+    const menuOptions = members.map((member) =>
+        new StringSelectMenuOptionBuilder().setLabel(member.displayName).setValue(member.id),
     );
 
-
     const AIoption = new StringSelectMenuOptionBuilder()
-        .setLabel("AI")
-        .setDescription("if no user available")
-        .setValue("AI")
+        .setLabel('AI')
+        .setDescription('if no user available')
+        .setValue('AI');
 
     menuOptions.push(AIoption);
-    
-    const WitnessSelect = new StringSelectMenuBuilder()
-        .setCustomId('custom_witness_select')
-        .setPlaceholder('Choose a Witness from the list...')
-        .addOptions(menuOptions);
-    
-    const DefendantSelect = new StringSelectMenuBuilder()
-        .setCustomId('custom_Defendant_select')
-        .setPlaceholder('Choose a Defendant from the list...')
-        .addOptions(menuOptions);
 
-    const JurySelect = new StringSelectMenuBuilder()
-        .setCustomId('custom_Jury_select')
-        .setPlaceholder('Choose a Jury from the list...')
-        .addOptions(menuOptions);
+    const caseId = await createCourtCase({
+        guildId: interaction.guild.id,
+        channelId,
+        createdBy: interaction.user.id,
+        participants: members.map((member) => ({
+            id: member.id,
+            name: member.displayName,
+        })),
+    });
 
-    const AttorneysSelect = new StringSelectMenuBuilder()
-        .setCustomId('custom_Attorneys_select')
-        .setPlaceholder('Choose an Attorney from the list...')
-        .addOptions(menuOptions);
+    for (const role of COURT_ROLES) {
+        const customId = `court_role_${role}_${Date.now()}`;
 
-    const PlaintiffSelect = new StringSelectMenuBuilder()
-        .setCustomId('custom_Plaintiff_select')
-        .setPlaceholder('Choose a Plaintiff from the list...')
-        .addOptions(menuOptions);
+        const roleSelect = new StringSelectMenuBuilder()
+            .setCustomId(customId)
+            .setPlaceholder(`Choose ${role}...`)
+            .addOptions(menuOptions);
 
-    
+        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(roleSelect);
+
+        const prompt = await interaction.followUp({
+            content: `Pick the **${role}** for case ${caseId}.`,
+            components: [row],
+        });
+
+        try {
+            const selection = await prompt.awaitMessageComponent({
+                componentType: ComponentType.StringSelect,
+                time: 60000,
+                filter: (componentInteraction: any) =>
+                    componentInteraction.user.id === interaction.user.id && componentInteraction.customId === customId,
+            });
+
+            const selectedId = selection.values[0];
+
+            if (!selectedId) {
+                await selection.update({
+                    content: `No selection was made for ${role}.`,
+                    components: [],
+                });
+                continue;
+            }
+
+            await assignRoleToCase({
+                caseId,
+                role,
+                selectedId,
+                assignedBy: interaction.user.id,
+            });
+
+            await selection.update({
+                content: `${role} set to **${selectedId}**.`,
+                components: [],
+            });
+        } catch {
+            await prompt.edit({
+                content: `Selection timed out for ${role}.`,
+                components: [],
+            });
+        }
+    }
+
+    await interaction.followUp(`Role setup complete for case ${caseId}.`);
 }
