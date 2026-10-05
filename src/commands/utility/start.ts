@@ -1,6 +1,7 @@
-import { Message, SlashCommandBuilder } from 'discord.js';
+import {SlashCommandBuilder } from 'discord.js';
 import { isMemberInServer } from '../../misc/verifyUserId.ts';
 import 'dotenv/config';
+import { createDiscordChannel, getRolesInfo } from '../../misc/courtLoop.ts';
 
 const Stage = {
     Pinging: 0,
@@ -95,5 +96,17 @@ export default {
         }
 
         console.log(`Continuing execution. Total IDs found:`, allExtractedIds);
+
+        let channel;
+
+        if (await createDiscordChannel(interaction) != null) {
+            channel = createDiscordChannel(interaction);
+        } else {
+            await interaction.followUp("channel creation failed");
+        }
+
+        // get role info
+        getRolesInfo(interaction, allExtractedIds);
+        
     }
 }
