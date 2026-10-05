@@ -2,6 +2,8 @@ import {SlashCommandBuilder } from 'discord.js';
 import { isMemberInServer } from '../../misc/verifyUserId.ts';
 import 'dotenv/config';
 import { createDiscordChannel, getRolesInfo } from '../../misc/courtLoop.ts';
+import { appendTranscriptEntry, saveCourtCase } from '../../misc/caseStore.ts';
+import type { CaseParticipant, CourtCase } from '../../interfaces/ICourtCase.ts';
 
 const Stage = {
     Pinging: 0,
@@ -97,16 +99,63 @@ export default {
 
         console.log(`Continuing execution. Total IDs found:`, allExtractedIds);
 
-        let channel;
-
-        if (await createDiscordChannel(interaction) != null) {
-            channel = createDiscordChannel(interaction);
-        } else {
+        const channel = await createDiscordChannel(interaction);
+        if (channel === null) {
             await interaction.followUp("channel creation failed");
+            return;
         }
 
-        // get role info
-        getRolesInfo(interaction, allExtractedIds);
+        const now = new Date().toISOString();
+        const participantFor = (userId: string): CaseParticipant => ({
+            kind: 'human',
+            userId,
+            name: null,
+        });
+        const courtCase: CourtCase = {
+            caseId: channel.id,
+            title: `Court case ${channel.id}`,
+            description: '',
+            status: 'setup',
+            createdAt: now,
+            updatedAt: now,
+            participants: allExtractedIds.map(participantFor),
+            roles: {
+                judge: { kind: 'ai', name: null },
+                plaintiff: allExtractedIds[0] ? participantFor(allExtractedIds[0]) : null,
+                defendant: allExtractedIds[1] ? participantFor(allExtractedIds[1]) : null,
+                attorneys: [],
+                witnesses: [],
+                jury: [],
+            },
+            transcriptFile: 'transcript.jsonl',
+        };
+
+        await saveCourtCase(courtCase);
+        await appendTranscriptEntry(courtCase.caseId, {
+            timestamp: now,
+            speaker: 'system',
+            name: 'Court',
+            role: 'system',
+            content: 'Case opened. The case JSON is the editable source of truth for roles and names.',
+        });
+        await interaction.followUp(`Case saved to data/cases/${courtCase.caseId}/case.json. Edit that file to set the title, roles, or AI names.`);
+
+        const selectedRoles = await getRolesInfo(channel, interaction, allExtractedIds);
+        if (selectedRoles === null) {
+            await interaction.followUp('Role selection timed out. The case JSON was created, but its roles are still editable.');
+            return;
+        }
+
+        courtCase.roles = selectedRoles;
+        await saveCourtCase(courtCase);
+        await appendTranscriptEntry(courtCase.caseId, {
+            timestamp: new Date().toISOString(),
+            speaker: 'system',
+            name: 'Court',
+            role: 'system',
+            content: `Roles assigned: ${JSON.stringify(selectedRoles)}`,
+        });
+        await interaction.followUp(`Roles saved to data/cases/${courtCase.caseId}/case.json.`);
         
     }
 }

@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { IFolderContents } from '../interfaces/IFolderContent.ts';
+
+const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export class fileNavig {
     static async getFolderContents(folderPath: string, fileExtension: string): Promise<IFolderContents[]> {
-        const rootPath = path.join(process.cwd(), "/src/", folderPath);
+        const rootPath = path.join(projectRoot, 'src', folderPath);
         const results: IFolderContents[] = [];
         const visitedPaths = new Set<string>(); // Prevents infinite recursion
 
